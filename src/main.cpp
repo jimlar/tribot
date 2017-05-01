@@ -5,12 +5,15 @@ surroundings. If it senses an object, it turns on its yellow LED
 and attempts to face towards that object. */
 
 #include <Wire.h>
+#include <Servo.h>
 #include <Zumo32U4.h>
 
 Zumo32U4LCD lcd;
 Zumo32U4Motors motors;
 Zumo32U4ProximitySensors proxSensors;
 Zumo32U4ButtonA buttonA;
+Servo servo;
+
 
 // A sensors reading must be greater than or equal to this
 // threshold in order for the program to consider that sensor as
@@ -61,10 +64,16 @@ uint16_t turnSpeed = turnSpeedMax;
 // The time, in milliseconds, when an object was last seen.
 uint16_t lastTimeObjectSeen = 0;
 
+unsigned long lastFlagFlip = 0;
+int lastServo = 10;
+
 void setup()
 {
   Serial.begin(115200);
+
   proxSensors.initFrontSensor();
+  servo.attach(6);
+  servo.write(90);
 
   // Wait for the user to press A before driving the motors.
   lcd.clear();
@@ -105,8 +114,25 @@ void run_forest()
   running = true;
 }
 
+void wave_flag() {
+  if (lastFlagFlip + 1000 < millis()) {
+    lastFlagFlip = millis();
+
+    if (lastServo == 10) {
+      lastServo = 170;
+    } else if (lastServo == 170) {
+      lastServo = 10;
+    }
+    Serial.println("Flipping flag");
+    Serial.println(lastServo);
+    servo.write(lastServo);
+  }
+}
+
 void loop()
 {
+  wave_flag();
+
   // Read the front proximity sensor and gets its left value (the
   // amount of reflectance detected while using the left LEDs)
   // and right value.
@@ -134,6 +160,8 @@ void loop()
   // Constrain the turn speed so it is between turnSpeedMin and
   // turnSpeedMax.
   turnSpeed = constrain(turnSpeed, turnSpeedMin, turnSpeedMax);
+
+  if (false) {
 
   if (objectSeen)
   {
@@ -180,6 +208,8 @@ void loop()
       turnLeft();
     }
   }
+}
+
 
   lcd.gotoXY(0, 0);
   lcd.print(leftValue);
