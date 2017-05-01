@@ -63,8 +63,8 @@ uint16_t turnSpeed = turnSpeedMax;
 // The time, in milliseconds, when an object was last seen.
 uint16_t lastTimeObjectSeen = 0;
 
-int flagUp = 3000;
-int flagLeft = 1600;
+int flagUp = 2600;
+int flagLeft = 1200;
 int flagRight = 4400;
 unsigned long lastFlagFlip = 0;
 int lastServo = flagUp;
@@ -117,7 +117,7 @@ void run_forest()
 }
 
 void wave_flag() {
-  if (lastFlagFlip + 1000 < millis()) {
+  if (lastFlagFlip + 2000 < millis()) {
     lastFlagFlip = millis();
 
     if (lastServo == flagLeft) {
