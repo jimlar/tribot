@@ -6,7 +6,7 @@ and attempts to face towards that object. */
 
 #include <Wire.h>
 #include <Zumo32U4.h>
-#include "servo.h"
+#include <ZumoServo.h>
 
 Zumo32U4LCD lcd;
 Zumo32U4Motors motors;
