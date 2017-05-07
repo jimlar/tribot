@@ -1,6 +1,5 @@
 #include <Wire.h>
 #include <Zumo32U4.h>
-#include <ZumoServo.h>
 
 Zumo32U4ButtonA buttonA;
 Zumo32U4LCD lcd;
@@ -8,53 +7,30 @@ Zumo32U4LineSensors lineSensors;
 Zumo32U4ProximitySensors proxSensors;
 Zumo32U4Motors motors;
 
-#define ATTACK_SPEED 800
+#define ATTACK_SPEED 400
 #define EVADE_REVERSE_SPEED 400
 #define EVADE_REVERSE_TIME 300
 #define EVADE_SPEED 400
 #define EVADE_TIME 300
 
-#define SEARCH_ADJUST_SPEED 200
-#define SEARCH_SPEED1 400
-#define SEARCH_SPEED2 -400
+#define SEARCH_TURN_SPEED_MAX 400
+#define SEARCH_TURN_SPEED_MIN 200
+#define SEARCH_DECELERATION 10
+#define SEARCH_ACCELERATION 10
 
 #define WHITE_THRESHOLD 200
+#define PROX_THRESHOLD 3
 
 #define MODE_SEARCH 0
 #define MODE_ATTACK 1
 
 int active_mode = MODE_SEARCH;
 
-
 uint16_t lineSensorValues[3];
 uint8_t leftProxValue;
 uint8_t rightProxValue;
 
-int flagUp = 2600;
-int flagLeft = 1500;
-int flagRight = 4400;
-
-unsigned long lastFlagFlip = 0;
-int lastServo = flagUp;
-
-void flag_left() {
-  servoSetPosition(flagLeft);
-}
-
-void wave_flag() {
-  if (lastFlagFlip + 10000 < millis()) {
-    lastFlagFlip = millis();
-
-    if (lastServo == flagLeft) {
-      lastServo = flagRight;
-    } else {
-      lastServo = flagLeft;
-    }
-    servoSetPosition(lastServo);
-  }
-}
-
-void log(char *msg) {
+void log(String msg) {
   Serial.print(millis());
   Serial.print(": ");
   Serial.println(msg);
@@ -67,7 +43,6 @@ void wait_for_start() {
   lcd.clear();
   lcd.print("1 sec");
   delay(1000);
-  flag_left();
 }
 
 void printLineReadingsToLCD()
@@ -107,23 +82,35 @@ boolean objectSeen(uint8_t threshold) {
 }
 
 void search() {
+  static int turnSpeed = SEARCH_TURN_SPEED_MAX;
+
   ledYellow(true);
-  if (objectSeen(2)) {
+  boolean objSeen = objectSeen(PROX_THRESHOLD);
+
+  if (objSeen) {
+    turnSpeed -= SEARCH_DECELERATION;
+  } else {
+    turnSpeed += SEARCH_ACCELERATION;
+  }
+  turnSpeed = constrain(turnSpeed, SEARCH_TURN_SPEED_MIN, SEARCH_TURN_SPEED_MAX);
+
+  if (objSeen) {
     if (leftProxValue < rightProxValue) {
-         motors.setSpeeds(-SEARCH_ADJUST_SPEED, SEARCH_ADJUST_SPEED);
+         motors.setSpeeds(-turnSpeed, turnSpeed);
          log("Search - object seen, searching right");
 
      } else if (leftProxValue > rightProxValue) {
-         motors.setSpeeds(-SEARCH_ADJUST_SPEED, SEARCH_ADJUST_SPEED);
+         motors.setSpeeds(-turnSpeed, turnSpeed);
          log("Search - object seen, searching left");
      } else {
          active_mode = MODE_ATTACK;
          log("Search - object seen, switching to attack");
+         turnSpeed = SEARCH_TURN_SPEED_MAX;
      }
 
   } else {
     log("Search - nothing seen");
-    motors.setSpeeds(SEARCH_SPEED1, SEARCH_SPEED2);
+    motors.setSpeeds(-turnSpeed, turnSpeed);
   }
 }
 
@@ -154,8 +141,6 @@ void setup()
 {
   proxSensors.initFrontSensor();
   lineSensors.initThreeSensors();
-  servoInit();
-  servoSetPosition(flagUp);
   wait_for_start();
 }
 
@@ -184,8 +169,6 @@ void loop() {
     lineRight = lineSensorValues[2] < WHITE_THRESHOLD;
     printAllReadingsToLCD();
   }
-
-  //wave_flag();
 
   if (lineLeft) {
     evadeRight();
