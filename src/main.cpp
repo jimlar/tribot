@@ -6,13 +6,13 @@ and attempts to face towards that object. */
 
 #include <Wire.h>
 #include <Zumo32U4.h>
-#include <ZumoServo.h>
 
 Zumo32U4LCD lcd;
 Zumo32U4Motors motors;
 Zumo32U4ProximitySensors proxSensors;
 Zumo32U4ButtonA buttonA;
-
+Zumo32U4LineSensors lineSensors;
+Zumo32U4Buzzer buzzer;
 
 // A sensors reading must be greater than or equal to this
 // threshold in order for the program to consider that sensor as
@@ -21,7 +21,7 @@ const uint8_t sensorThreshold = 1;
 
 // The maximum speed to drive the motors while turning.  400 is
 // full speed.
-const uint16_t forwardSpeed = 400;
+const uint16_t forwardSpeed = 400       ;
 
 // The maximum speed to drive the motors while turning.  400 is
 // full speed.
@@ -38,6 +38,21 @@ const uint16_t deceleration = 10;
 // The amount to increase the speed by during each cycle when an
 // object is not seen.
 const uint16_t acceleration = 10;
+
+
+/* BEGIN LINE SENSOR STUFF */
+#define NUM_SENSORS 3
+unsigned int lineSensorValues[NUM_SENSORS];
+// These might need to be tuned for different motor types.
+#define QTR_THRESHOLD     1000  // microseconds
+#define REVERSE_SPEED     200  // 0 is stopped, 400 is full speed
+#define TURN_SPEED        200
+#define FORWARD_SPEED     100
+#define REVERSE_DURATION  200  // ms
+#define TURN_DURATION     300  // ms
+bool useEmitters = true;
+/* END LINE SENSOR STUFF */
+
 
 #define LEFT 0
 #define RIGHT 1
@@ -63,25 +78,23 @@ uint16_t turnSpeed = turnSpeedMax;
 // The time, in milliseconds, when an object was last seen.
 uint16_t lastTimeObjectSeen = 0;
 
-int flagUp = 2600;
-int flagLeft = 1200;
-int flagRight = 4400;
-unsigned long lastFlagFlip = 0;
-int lastServo = flagUp;
-
 void setup()
 {
   Serial.begin(115200);
-
   proxSensors.initFrontSensor();
-  servoInit();
-  servoSetPosition(flagUp);
+  lineSensors.initThreeSensors();
 
   // Wait for the user to press A before driving the motors.
   lcd.clear();
   lcd.print(F("Press A"));
   buttonA.waitForButton();
   lcd.clear();
+  for (int i = 0; i < 3; i++)
+  {
+    buzzer.playNote(NOTE_G(3), 200, 15);
+    delay(250);
+  }
+  buzzer.playNote(NOTE_G(4), 200, 15);
 }
 
 void turnRight()
@@ -116,111 +129,136 @@ void run_forest()
   running = true;
 }
 
-void wave_flag() {
-  if (lastFlagFlip + 2000 < millis()) {
-    lastFlagFlip = millis();
-
-    if (lastServo == flagLeft) {
-      lastServo = flagRight;
-    } else {
-      lastServo = flagLeft;
-    }
-    Serial.println("Flipping flag");
-    Serial.println(lastServo);
-    servoSetPosition(lastServo);
-  }
+void printReadingsToSerial()
+{
+  char buffer[80];
+  sprintf(buffer, "%4d %4d %4d %c\n",
+    lineSensorValues[0],
+    lineSensorValues[1],
+    lineSensorValues[2],
+    useEmitters ? 'E' : 'e'
+  );
+  Serial.print(buffer);
 }
 
 void loop()
 {
-  wave_flag();
-
   // Read the front proximity sensor and gets its left value (the
   // amount of reflectance detected while using the left LEDs)
   // and right value.
   proxSensors.read();
+  lineSensors.read(lineSensorValues, useEmitters ? QTR_EMITTERS_ON : QTR_EMITTERS_OFF);
   uint8_t leftValue = proxSensors.countsFrontWithLeftLeds();
   uint8_t rightValue  = proxSensors.countsFrontWithRightLeds();
 
   // Determine if an object is visible or not.
   bool objectSeen = leftValue >= sensorThreshold || rightValue >= sensorThreshold;
 
-  if (objectSeen)
+
+
+  if (lineSensorValues[0] < QTR_THRESHOLD)
   {
-    // An object is visible, so we will start decelerating in
-    // order to help the robot find the object without
-    // overshooting or oscillating.
-    turnSpeed -= deceleration;
+    // If leftmost sensor detects line, reverse and turn to the
+    // right.
+    lcd.clear();
+    lcd.print(F("LL"));
+    // buttonA.waitForButton();
+    // motors.setSpeeds(-REVERSE_SPEED, -REVERSE_SPEED);
+    delay(REVERSE_DURATION);
+    motors.setSpeeds(TURN_SPEED, -TURN_SPEED);
+    delay(TURN_DURATION);
+    motors.setSpeeds(FORWARD_SPEED, FORWARD_SPEED);
   }
-  else
+  else if (lineSensorValues[NUM_SENSORS - 1] < QTR_THRESHOLD)
   {
-    // An object is not visible, so we will accelerate in order
-    // to help find the object sooner.
-    turnSpeed += acceleration;
+    // If rightmost sensor detects line, reverse and turn to the
+    // left.
+    lcd.clear();
+    lcd.print(F("LR"));
+    // buttonA.waitForButton();
+    motors.setSpeeds(-REVERSE_SPEED, -REVERSE_SPEED);
+    delay(REVERSE_DURATION);
+    motors.setSpeeds(-TURN_SPEED, TURN_SPEED);
+    delay(TURN_DURATION);
+    motors.setSpeeds(FORWARD_SPEED, FORWARD_SPEED);
   }
-
-  // Constrain the turn speed so it is between turnSpeedMin and
-  // turnSpeedMax.
-  turnSpeed = constrain(turnSpeed, turnSpeedMin, turnSpeedMax);
-
-  if (true) {
-
-  if (objectSeen)
-  {
-    // An object seen.
-    ledYellow(1);
-
-    lastTimeObjectSeen = millis();
-
-    bool lastTurnRight = turnRight;
-
-    if (leftValue < rightValue)
-    {
-      // The right value is greater, so the object is probably
-      // closer to the robot's right LEDs, which means the robot
-      // is not facing it directly.  Turn to the right to try to
-      // make it more even.
-      turnRight();
-      senseDir = RIGHT;
-    }
-    else if (leftValue > rightValue)
-    {
-      // The left value is greater, so turn to the left.
-      turnLeft();
-      senseDir = LEFT;
-    }
-    else
-    {
-      // The values are equal, so stop the motors.
-      run_forest();
-    }
+  else {
+    lcd.clear();
+    lcd.print(F("No line"));
+    run_forest();
   }
-  else
-  {
-    // No object is seen, so just keep turning in the direction
-    // that we last sensed the object.
-    ledYellow(0);
+  // else if (objectSeen)
+  // {
+  //   // An object is visible, so we will start decelerating in
+  //   // order to help the robot find the object without
+  //   // overshooting or oscillating.
+  //   turnSpeed -= deceleration;
+  // }
+  // else
+  // {
+  //   // An object is not visible, so we will accelerate in order
+  //   // to help find the object sooner.
+  //   turnSpeed += acceleration;
+  // }
+  //
+  // // Constrain the turn speed so it is between turnSpeedMin and
+  // // turnSpeedMax.
+  // turnSpeed = constrain(turnSpeed, turnSpeedMin, turnSpeedMax);
+  //
+  // if (objectSeen)
+  // {
+  //   // An object seen.
+  //   ledYellow(1);
+  //
+  //   lastTimeObjectSeen = millis();
+  //
+  //   bool lastTurnRight = turnRight;
+  //
+  //   if (leftValue < rightValue)
+  //   {
+  //     // The right value is greater, so the object is probably
+  //     // closer to the robot's right LEDs, which means the robot
+  //     // is not facing it directly.  Turn to the right to try to
+  //     // make it more even.
+  //     turnRight();
+  //     senseDir = RIGHT;
+  //   }
+  //   else if (leftValue > rightValue)
+  //   {
+  //     // The left value is greater, so turn to the left.
+  //     turnLeft();
+  //     senseDir = LEFT;
+  //   }
+  //   else
+  //   {
+  //     // The values are equal, so stop the motors.
+  //     run_forest();
+  //   }
+  // }
+  // else
+  // {
+  //   // No object is seen, so just keep turning in the direction
+  //   // that we last sensed the object.
+  //   ledYellow(0);
+  //
+  //   if (senseDir == RIGHT)
+  //   {
+  //     turnRight();
+  //   }
+  //   else
+  //   {
+  //     turnLeft();
+  //   }
+  // }
 
-    if (senseDir == RIGHT)
-    {
-      turnRight();
-    }
-    else
-    {
-      turnLeft();
-    }
-  }
-}
-
-
-  lcd.gotoXY(0, 0);
-  lcd.print(leftValue);
-  lcd.print(' ');
-  lcd.print(rightValue);
-  lcd.gotoXY(0, 1);
-  lcd.print(running ? 'F' : (turningRight ? 'R' : (turningLeft ? 'L' : ' ')));
-  lcd.print(' ');
-  lcd.print(turnSpeed);
-  lcd.print(' ');
-  lcd.print(' ');
+  // lcd.gotoXY(0, 0);
+  // lcd.print(leftValue);
+  // lcd.print(' ');
+  // lcd.print(rightValue);
+  // lcd.gotoXY(0, 1);
+  // lcd.print(running ? 'F' : (turningRight ? 'R' : (turningLeft ? 'L' : ' ')));
+  // lcd.print(' ');
+  // lcd.print(turnSpeed);
+  // lcd.print(' ');
+  // lcd.print(' ');
 }
